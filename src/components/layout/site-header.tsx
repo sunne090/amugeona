@@ -1,0 +1,3 @@
+import Link from "next/link";
+import { siteConfig } from "@/config/site";
+export function SiteHeader() { return <header className="border-b border-[var(--ink)] bg-[var(--canvas)]"><div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8"><Link href="/" className="font-mono text-sm font-black tracking-[-0.08em]">{siteConfig.shortName}<span className="text-[var(--coral)]">.zip</span></Link><nav aria-label="주요 메뉴" className="flex items-center gap-5 text-sm font-bold"><a href="#projects" className="transition-colors hover:text-[var(--coral)]">작품</a><a href="#about" className="transition-colors hover:text-[var(--coral)]">소개</a></nav></div></header>; }

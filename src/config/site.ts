@@ -1,0 +1,1 @@
+export const siteConfig = { name: "AMUGEONA", shortName: "amugeona", heroTitle: "매일 한 조각의 쓸데없는 재미.", description: "AI 바이브 코딩으로 매일 만드는, 작고 이상하고 직접 만져볼 수 있는 웹 장난감 모음", creators: "언니 × 동생 · two developers making tiny things" } as const;
