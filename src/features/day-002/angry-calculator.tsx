@@ -1,18 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, type PointerEvent } from "react";
 import styles from "./angry-calculator.module.css";
 
 type Operator = "+" | "−" | "×" | "÷" | null;
 
-const numberLayouts = [
-  ["7", "8", "9", "4", "5", "6", "1", "2", "3"],
-  ["1", "7", "4", "8", "2", "9", "5", "3", "6"],
-  ["6", "2", "8", "3", "9", "1", "7", "4", "5"],
-  ["5", "9", "3", "1", "6", "8", "4", "7", "2"],
-] as const;
-
-const unlockStages = ["타이밍 맞추기", "짝맞추기", "도망가는 = 잡기"] as const;
+const dialNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0] as const;
+const unlockStages = ["계산기 수평 맞추기", "짝맞추기", "도망가는 = 잡기"] as const;
 const memoryCards = ["◒", "✦", "⌁", "◒", "✦", "⌁"] as const;
 const memoryOrderStart = [0, 1, 2, 3, 4, 5];
 const runawayPositions = [
@@ -33,8 +27,9 @@ export function AngryCalculator() {
   const [operator, setOperator] = useState<Operator>(null);
   const [waitingForValue, setWaitingForValue] = useState(false);
   const [hiddenResult, setHiddenResult] = useState<number | null>(null);
-  const [layoutIndex, setLayoutIndex] = useState(0);
-  const [scannerPosition, setScannerPosition] = useState(0);
+  const [dialNumber, setDialNumber] = useState<number | null>(null);
+  const [dialProgress, setDialProgress] = useState(0);
+  const [machineAngle, setMachineAngle] = useState(-12);
   const [unlockAttempts, setUnlockAttempts] = useState(0);
   const [unlockStage, setUnlockStage] = useState(0);
   const [memoryOrder, setMemoryOrder] = useState(memoryOrderStart);
@@ -44,7 +39,9 @@ export function AngryCalculator() {
   const [runawayCount, setRunawayCount] = useState(0);
   const [patience, setPatience] = useState(100);
   const [message, setMessage] = useState("숫자를 입력하세요. 키패드가 얌전할 때요.");
-  const scannerDirection = useRef(1);
+  const dialStartX = useRef(0);
+  const machineStartX = useRef(0);
+  const machineStartAngle = useRef(-12);
   const memoryResetTimer = useRef<number | null>(null);
 
   const nudgePatience = (amount = 6) => setPatience((value) => Math.max(8, value - amount));
@@ -64,27 +61,6 @@ export function AngryCalculator() {
     setRunawayCount(0);
   };
 
-  useEffect(() => {
-    if (hiddenResult === null || unlockStage !== 0) return;
-
-    const scanner = window.setInterval(() => {
-      setScannerPosition((position) => {
-        const next = position + scannerDirection.current * 1.2;
-        if (next >= 100) {
-          scannerDirection.current = -1;
-          return 100;
-        }
-        if (next <= 0) {
-          scannerDirection.current = 1;
-          return 0;
-        }
-        return next;
-      });
-    }, 30);
-
-    return () => window.clearInterval(scanner);
-  }, [hiddenResult, unlockStage]);
-
   const enterNumber = (number: string) => {
     clearHiddenResult();
     setDisplay((value) => {
@@ -93,9 +69,8 @@ export function AngryCalculator() {
       return value === "0" ? number : `${value}${number}`;
     });
     setWaitingForValue(false);
-    setLayoutIndex((index) => (index + 1) % numberLayouts.length);
-    nudgePatience(9);
-    setMessage(`“${number}” 입력 완료. 숫자들이 자리를 바꿨어요. 다시 찾으세요.`);
+    nudgePatience(number === "0" ? 12 : 8);
+    setMessage(`“${number}” 입력 완료. 다이얼이 천천히 제자리로 돌아옵니다.`);
   };
 
   const enterDecimal = () => {
@@ -153,20 +128,17 @@ export function AngryCalculator() {
     }
 
     setHiddenResult(result);
-    setScannerPosition(0);
-    scannerDirection.current = 1;
+    setMachineAngle(-12);
     setUnlockAttempts(0);
     setUnlockStage(0);
     resetMemoryGame();
     setRunawayCount(0);
     setDisplay("정답은…");
-    setMessage("정답 보관함이 잠겼습니다. 타이밍 좋게 해제해 보세요.");
+    setMessage("정답 보관함이 삐딱하게 잠겼습니다. 계산기부터 똑바로 돌려보세요.");
   };
 
   const advanceUnlockStage = (nextMessage: string) => {
     setUnlockStage((stage) => stage + 1);
-    setScannerPosition(0);
-    scannerDirection.current = 1;
     nudgePatience(8);
     setMessage(nextMessage);
   };
@@ -185,18 +157,56 @@ export function AngryCalculator() {
     setMessage(hiddenResult === 42 ? "42. 우주의 답까지 훔쳐보셨네요." : "네, 그게 정답이에요. 생각보다 별거 없죠?");
   };
 
-  const unlockByTiming = () => {
-    if (hiddenResult === null) return;
+  const startMachineRotation = (event: PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    machineStartX.current = event.clientX;
+    machineStartAngle.current = machineAngle;
+  };
 
-    const hitTarget = scannerPosition >= 58 && scannerPosition <= 82;
-    if (!hitTarget) {
-      setScannerPosition(0);
-      scannerDirection.current = 1;
-      failUnlockStage("1단계 실패. 초록 구간에서 눌러야죠. 다시 집중하세요.");
+  const rotateMachine = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const nextAngle = Math.max(-15, Math.min(15, machineStartAngle.current + (event.clientX - machineStartX.current) / 12));
+    setMachineAngle(nextAngle);
+  };
+
+  const finishMachineRotation = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (Math.abs(machineAngle) <= 1.5) {
+      setMachineAngle(0);
+      advanceUnlockStage("수평 맞춤 완료. 이제 뒤집힌 카드의 짝을 맞춰보세요.");
       return;
     }
+    setMessage("아직 기울었어요. 계산기 본체를 조금 더 돌려보세요.");
+  };
 
-    advanceUnlockStage("타이밍은 통과. 이제 뒤집힌 카드의 짝을 맞춰보세요.");
+  const dialDistance = (number: number) => number === 0 ? 180 : 70 + number * 10;
+
+  const startDial = (event: PointerEvent<HTMLButtonElement>, number: number) => {
+    if (hiddenResult !== null) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dialStartX.current = event.clientX;
+    setDialNumber(number);
+    setDialProgress(0);
+    setMessage(`${number}번 구멍을 끝까지 돌리세요.`);
+  };
+
+  const rotateDial = (event: PointerEvent<HTMLButtonElement>) => {
+    if (dialNumber === null || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    setDialProgress(Math.min(dialDistance(dialNumber), Math.max(0, event.clientX - dialStartX.current)));
+  };
+
+  const finishDial = (event: PointerEvent<HTMLButtonElement>, number: number) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    const completed = dialNumber === number && dialProgress >= dialDistance(number);
+    setDialNumber(null);
+    setDialProgress(0);
+    if (!completed) {
+      setMessage("끝까지 안 돌렸어요. 전화기는 대충 누르는 물건이 아니에요.");
+      return;
+    }
+    enterNumber(String(number));
   };
 
   const chooseMemoryCard = (cardIndex: number) => {
@@ -258,9 +268,9 @@ export function AngryCalculator() {
     setOperator(null);
     setWaitingForValue(false);
     setHiddenResult(null);
-    setLayoutIndex(0);
-    setScannerPosition(0);
-    scannerDirection.current = 1;
+    setDialNumber(null);
+    setDialProgress(0);
+    setMachineAngle(-12);
     setUnlockAttempts(0);
     setUnlockStage(0);
     resetMemoryGame();
@@ -287,7 +297,7 @@ export function AngryCalculator() {
   return (
     <section className={styles.calculator} aria-label="킹받는 계산기">
       <div className={styles.topline}>
-        <p>DAY 001 · ANNOYING BUT ACCURATE</p>
+        <p>DAY 002 · ANNOYING BUT ACCURATE</p>
         <span>인내심 {patience}%</span>
       </div>
       <div className={styles.patienceTrack} aria-hidden="true"><span style={{ width: `${patience}%` }} /></div>
@@ -297,7 +307,8 @@ export function AngryCalculator() {
         <p>계산은 정확해요. 키패드의 협조는 장담 못 해요.</p>
       </header>
 
-      <div className={styles.machine}>
+      <div className={hiddenResult !== null && unlockStage === 0 ? `${styles.machineFrame} ${styles.rotatingMachineFrame}` : styles.machineFrame}>
+      <div className={styles.machine} style={{ transform: hiddenResult !== null && unlockStage === 0 ? `rotate(${machineAngle}deg)` : undefined }}>
         <div className={styles.display} aria-live="polite">
           <span className={styles.expression}>{expression}</span>
           <output className={hiddenResult !== null ? styles.redacted : undefined}>{display}</output>
@@ -307,12 +318,10 @@ export function AngryCalculator() {
           <div className={styles.unlockHeader}><span>{currentUnlockStage}</span><span>{unlockStage + 1}/{unlockStages.length}단계 · 시도 {unlockAttempts}회</span></div>
           <div className={styles.stageDots} aria-label={`정답 해제 ${unlockStage + 1}단계 진행 중`}>{unlockStages.map((stage, index) => <span key={stage} className={index < unlockStage ? styles.completedStage : index === unlockStage ? styles.currentStage : undefined}>{index + 1}</span>)}</div>
           {unlockStage === 0 && <>
-            <p className={styles.challengeHint}>초록 구간에서 해제 버튼을 누르세요.</p>
-            <div className={styles.unlockTrack} role="meter" aria-label="정답 해제 게이지" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(scannerPosition)}>
-              <span className={styles.unlockTarget} style={{ left: "58%", width: "24%" }} />
-              <span className={styles.unlockScanner} style={{ left: `${scannerPosition}%` }} />
+            <p className={styles.challengeHint}>계산기 본체를 좌우로 끌어 수평으로 맞추세요.</p>
+            <div className={styles.rotationPad} role="slider" aria-label="계산기 수평 조절" aria-valuemin={-15} aria-valuemax={15} aria-valuenow={Math.round(machineAngle)} tabIndex={0} onPointerDown={startMachineRotation} onPointerMove={rotateMachine} onPointerUp={finishMachineRotation}>
+              <span>←</span><strong>{Math.round(machineAngle)}°</strong><span>→</span>
             </div>
-            <button type="button" className={styles.unlockButton} onClick={unlockByTiming}>타이밍 해제!</button>
           </>}
           {unlockStage === 1 && <>
             <p className={styles.challengeHint}>카드 세 쌍을 모두 맞추세요. 틀리면 순서가 조금 바뀝니다.</p>
@@ -331,23 +340,32 @@ export function AngryCalculator() {
           </>}
         </div>}
 
-        <div className={styles.keypad}>
-          <button type="button" className={styles.utility} onClick={reset}>AC</button>
-          <button type="button" className={styles.utility} onClick={changeSign}>+/−</button>
-          <button type="button" className={styles.utility} onClick={makePercent}>%</button>
-          <button type="button" className={styles.operator} onClick={() => chooseOperator("÷")}>÷</button>
-          {numberLayouts[layoutIndex].slice(0, 3).map((number) => <button key={number} type="button" className={styles.numberKey} onClick={() => enterNumber(number)}>{number}</button>)}
-          <button type="button" className={styles.operator} onClick={() => chooseOperator("×")}>×</button>
-          {numberLayouts[layoutIndex].slice(3, 6).map((number) => <button key={number} type="button" className={styles.numberKey} onClick={() => enterNumber(number)}>{number}</button>)}
-          <button type="button" className={styles.operator} onClick={() => chooseOperator("−")}>−</button>
-          {numberLayouts[layoutIndex].slice(6).map((number) => <button key={number} type="button" className={styles.numberKey} onClick={() => enterNumber(number)}>{number}</button>)}
-          <button type="button" className={styles.operator} onClick={() => chooseOperator("+")}>+</button>
-          <button type="button" className={styles.zero} onClick={() => enterNumber("0")}>0</button>
-          <button type="button" onClick={enterDecimal}>.</button>
-          <button type="button" className={styles.equals} onClick={calculateResult}>=</button>
+        <div className={styles.dialSection}>
+          <p>숫자 구멍을 잡고 오른쪽으로 끝까지 돌리세요. 0은 특히 멀어요.</p>
+          <div className={styles.rotaryDial} style={{ transform: `rotate(${dialNumber === null ? 0 : dialProgress / dialDistance(dialNumber) * 220}deg)` }}>
+            <span className={styles.dialCenter}>☎</span>
+            {dialNumbers.map((number, index) => {
+              const angle = index * 36 - 90;
+              const left = 50 + Math.cos(angle * Math.PI / 180) * 38;
+              const top = 50 + Math.sin(angle * Math.PI / 180) * 38;
+              return <button key={number} type="button" className={styles.dialHole} style={{ left: `${left}%`, top: `${top}%` }} onPointerDown={(event) => startDial(event, number)} onPointerMove={rotateDial} onPointerUp={(event) => finishDial(event, number)} onClick={(event) => { if (event.detail === 0) enterNumber(String(number)); }} aria-label={`${number}번 다이얼`}>{number}</button>;
+            })}
+          </div>
+          <div className={styles.dialControls}>
+            <button type="button" className={styles.utility} onClick={reset}>AC</button>
+            <button type="button" className={styles.utility} onClick={changeSign}>+/−</button>
+            <button type="button" className={styles.utility} onClick={makePercent}>%</button>
+            <button type="button" className={styles.operator} onClick={() => chooseOperator("÷")}>÷</button>
+            <button type="button" className={styles.operator} onClick={() => chooseOperator("×")}>×</button>
+            <button type="button" className={styles.operator} onClick={() => chooseOperator("−")}>−</button>
+            <button type="button" className={styles.operator} onClick={() => chooseOperator("+")}>+</button>
+            <button type="button" onClick={enterDecimal}>.</button>
+            <button type="button" className={styles.equals} onClick={calculateResult}>=</button>
+          </div>
         </div>
       </div>
-      <p className={styles.tip}>팁: 숫자를 누를 때마다 1~9 키가 섞입니다. 결과 보관함도 매번 다른 방식으로 귀찮게 해요.</p>
+      </div>
+      <p className={styles.tip}>팁: 숫자는 전화 다이얼을 끝까지 돌려 입력하세요. 0은 특히 오래 걸립니다.</p>
     </section>
   );
 }
